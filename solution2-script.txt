@@ -1,0 +1,78 @@
+:paste
+case class TempHeader (
+recordId: String,
+station: String,
+month: String,
+date: String,
+hour: String,
+temperature: Double
+)
+
+import spark.implicits._
+
+val weatherDF = spark.sparkContext.textFile("1902").
+map(
+rec => List (
+rec.substring(1,26).trim(),
+rec.substring(4,10).trim(),
+rec.substring(19,21).trim(),
+rec.substring(21,23).trim(),
+rec.substring(23,25).trim(),
+rec.substring(87,92).trim()
+)).
+map( att => TempHeader( att(0), att(1), att(2), att(3), att(4), (att(5).trim.toDouble)/10 ))
+.toDF()
+
+weatherDF.printSchema()
+
+weatherDF.createOrReplaceTempView("temperature")
+
+val query = spark.sql("""SELECT month, max(temperature), min(temperature), avg(temperature) FROM temperature GROUP BY month ORDER by month""".stripMargin)
+query.show()
+
+
+
+:paste
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.execution.datasources.hbase._
+
+case class weatherHBRec(
+recordId: String,
+stnId: String,
+OTSMonth: String,
+OTSDay: String,
+OTSHour: String,
+temp: String)
+
+def catalog =
+s"""{
+|"table":{"namespace":"default","name": "weatherHB"},
+|"rowkey":"key",
+|"columns":{
+|"recordId":{"cf":"rowkey", "col":"key", "type":"string"},
+|"stnId":{"cf":"Station", "col":"stationId", "type":"string"},
+|"OTSMonth":{"cf":"TimeStamp", "col":"timestampMonth", "type":"string"},
+|"OTSDay":{"cf":"TimeStamp", "col":"timestampDay", "type":"string"},
+|"OTSHour":{"cf":"TimeStamp", "col":"timestampHour", "type":"string"},
+|"temp":{"cf":"Temperature", "col":"temperatureC", "type":"string"}
+|}
+|}""".stripMargin
+
+val spark: SparkSession = SparkSession.builder().master("local[*]").appName("SparkByExamples.com").getOrCreate()
+
+import spark.implicits._
+
+val records2df = spark.sparkContext.textFile("1902").
+map(
+rec => List (
+rec.substring(1,26).trim(),
+rec.substring(4,10).trim(),
+rec.substring(19,21).trim(),
+rec.substring(21,23).trim(),
+rec.substring(23,25).trim(),
+rec.substring(87,92).trim()
+)).
+map( att => weatherHBRec( att(0), att(1), att(2), att(3), att(4), att(5) )).toDF().limit(10)
+
+records2df.write.options(Map(HBaseTableCatalog.tableCatalog -> catalog, HBaseTableCatalog.newTable -> "4")).format("org.apache.spark.sql.execution.datasources.hbase").save()
+
